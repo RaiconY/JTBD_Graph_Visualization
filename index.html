@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobs To Be Done - 3D Graph</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            cursor: grab;
+            background: #0a0a0a;
+        }
+        
+        body:active {
+            cursor: grabbing;
+        }
+        
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            user-select: none;
+            z-index: 100;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        #stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            user-select: none;
+            z-index: 100;
+            pointer-events: none;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            color: white;
+        }
+        
+        #startButton {
+            padding: 15px 40px;
+            font-size: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid white;
+            color: white;
+            border-radius: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 20px;
+        }
+        
+        #startButton:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+        
+        .description {
+            max-width: 600px;
+            text-align: center;
+            padding: 0 20px;
+            line-height: 1.6;
+            opacity: 0.95;
+        }
+    </style>
+</head>
+<body>
+    <div id="startScreen">
+        <h1>🫧 Jobs To Be Done - Граф работ 🫧</h1>
+        <div class="description">
+            <p>Визуализация концепции JTBD через связанные пузыри</p>
+            <p style="font-size: 14px; opacity: 0.8;">600+ узлов, связи зависят от расстояния</p>
+        </div>
+        <button id="startButton">Исследовать граф</button>
+        <p style="margin-top: 20px; opacity: 0.8; font-size: 14px;">Управление: WASD - движение, Мышь (зажать) - осмотр</p>
+    </div>
+    
+    <div id="info" style="display: none;">
+        <div style="font-weight: bold; margin-bottom: 8px;">📊 Jobs To Be Done Graph</div>
+        <div style="font-size: 12px; opacity: 0.8;">WASD - Движение</div>
+        <div style="font-size: 12px; opacity: 0.8;">Мышь (зажать) - Осмотр</div>
+        <div style="font-size: 12px; opacity: 0.8;">Shift - Ускорение</div>
+        <div style="font-size: 12px; opacity: 0.8;">Space/Ctrl - Вверх/Вниз</div>
+    </div>
+    
+    <div id="stats" style="display: none;">
+        <div style="font-weight: bold; margin-bottom: 8px;">📈 Статистика</div>
+        <div id="nodeCount" style="font-size: 12px;">Узлов: 0</div>
+        <div id="connectionCount" style="font-size: 12px;">Связей: 0</div>
+        <div id="avgConnections" style="font-size: 12px;">Среднее связей: 0</div>
+    </div>
+    
+    <div id="crosshair" style="display: none;"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let bubbles = [];
+        let connections = [];
+        let connectionLines = [];
+        let moveForward = false, moveBackward = false;
+        let moveLeft = false, moveRight = false;
+        let moveUp = false, moveDown = false;
+        let isShiftPressed = false;
+        
+        let velocity = new THREE.Vector3();
+        
+        // Переменные для управления мышью
+        let isMouseDown = false;
+        let mouseX = 0;
+        let mouseY = 0;
+        
+        // Группа для камеры
+        let yawObject;
+        let pitchObject;
+        
+        const startButton = document.getElementById('startButton');
+        const startScreen = document.getElementById('startScreen');
+        const info = document.getElementById('info');
+        const stats = document.getElementById('stats');
+        const crosshair = document.getElementById('crosshair');
+        
+        startButton.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            info.style.display = 'block';
+            stats.style.display = 'block';
+            crosshair.style.display = 'block';
+            init();
+            animate();
+        });
+        
+        function init() {
+            // Создание сцены
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x050510, 100, 800);
+            
+            // Создание камеры с контролем вращения
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+            
+            yawObject = new THREE.Object3D();
+            yawObject.position.set(0, 50, 150);
+            
+            pitchObject = new THREE.Object3D();
+            pitchObject.add(camera);
+            
+            yawObject.add(pitchObject);
+            scene.add(yawObject);
+            
+            // Создание рендерера
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.setClearColor(0x0a0a0a, 1);
+            document.body.appendChild(renderer.domElement);
+            
+            // Освещение
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.2);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3);
+            directionalLight.position.set(100, 200, 100);
+            scene.add(directionalLight);
+            
+            // Цветные точечные источники света для атмосферы
+            const pointLight1 = new THREE.PointLight(0x00ffff, 0.2, 300);
+            pointLight1.position.set(-100, 50, -100);
+            scene.add(pointLight1);
+            
+            const pointLight2 = new THREE.PointLight(0xff00ff, 0.2, 300);
+            pointLight2.position.set(100, 50, 100);
+            scene.add(pointLight2);
+            
+            const pointLight3 = new THREE.PointLight(0xffff00, 0.2, 300);
+            pointLight3.position.set(0, 100, 0);
+            scene.add(pointLight3);
+            
+            // Создание пузырей и связей
+            createBubblesAndConnections();
+            
+            // Визуализация связей
+            createConnectionLines();
+            
+            // Обновление статистики
+            updateStats();
+            
+            // Добавление частиц для атмосферы
+            createParticles();
+            
+            // Обработчики событий
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mouseup', onMouseUp);
+            document.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onWindowResize);
+            
+            // Предотвращаем контекстное меню
+            renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+        }
+        
+        function createBubblesAndConnections() {
+            const bubbleCount = 600; // Увеличено в 20 раз
+            const spreadRadius = 250; // Увеличен радиус распределения
+            
+            // Создаем пузыри с кластерным распределением
+            for (let i = 0; i < bubbleCount; i++) {
+                const radius = Math.random() * 0.8 + 0.5; // Немного меньше размер для большего количества
+                const geometry = new THREE.SphereGeometry(radius, 16, 8); // Меньше полигонов для производительности
+                
+                // Цвета пузырей
+                const hue = (i / bubbleCount) * 0.8 + Math.random() * 0.2;
+                const material = new THREE.MeshPhysicalMaterial({
+                    color: new THREE.Color().setHSL(hue, 0.7, 0.5),
+                    metalness: 0.1,
+                    roughness: 0.2,
+                    transparent: true,
+                    opacity: 0.7,
+                    emissive: new THREE.Color().setHSL(hue, 0.7, 0.2),
+                    emissiveIntensity: 0.2,
+                    side: THREE.DoubleSide
+                });
+                
+                const bubble = new THREE.Mesh(geometry, material);
+                
+                // Создаем кластерное распределение для более реалистичного графа
+                const clusterIndex = Math.floor(Math.random() * 8); // 8 кластеров
+                const clusterAngle = (clusterIndex / 8) * Math.PI * 2;
+                const clusterRadius = spreadRadius * (0.3 + Math.random() * 0.7);
+                const localSpread = 60; // Разброс внутри кластера
+                
+                bubble.position.set(
+                    Math.cos(clusterAngle) * clusterRadius + (Math.random() - 0.5) * localSpread,
+                    (Math.random() - 0.5) * 150,
+                    Math.sin(clusterAngle) * clusterRadius + (Math.random() - 0.5) * localSpread
+                );
+                
+                bubble.castShadow = true;
+                bubble.receiveShadow = true;
+                
+                // Сохраняем параметры для анимации
+                bubble.userData = {
+                    id: i,
+                    floatSpeed: Math.random() * 0.002 + 0.001,
+                    rotationSpeed: (Math.random() - 0.5) * 0.002,
+                    originalPosition: bubble.position.clone(),
+                    phase: Math.random() * Math.PI * 2,
+                    connections: []
+                };
+                
+                scene.add(bubble);
+                bubbles.push(bubble);
+            }
+            
+            // Создаем связи на основе расстояния
+            const maxConnectionDistance = 50; // Максимальное расстояние для связи
+            const minConnectionDistance = 5; // Минимальное расстояние
+            
+            for (let i = 0; i < bubbles.length; i++) {
+                for (let j = i + 1; j < bubbles.length; j++) {
+                    const distance = bubbles[i].position.distanceTo(bubbles[j].position);
+                    
+                    // Вероятность связи обратно пропорциональна расстоянию
+                    if (distance < maxConnectionDistance && distance > minConnectionDistance) {
+                        // Плавающая вероятность от 0.9 (близко) до 0.05 (далеко)
+                        const probability = Math.pow(1 - (distance / maxConnectionDistance), 2);
+                        
+                        if (Math.random() < probability) {
+                            // Сила связи обратно пропорциональна расстоянию
+                            const strength = 1 - (distance / maxConnectionDistance);
+                            
+                            connections.push({
+                                from: i,
+                                to: j,
+                                distance: distance,
+                                strength: strength
+                            });
+                            
+                            bubbles[i].userData.connections.push(j);
+                            bubbles[j].userData.connections.push(i);
+                        }
+                    }
+                }
+            }
+        }
+        
+        function createConnectionLines() {
+            // Группа для всех линий
+            const linesGroup = new THREE.Group();
+            
+            connections.forEach(connection => {
+                const points = [];
+                points.push(bubbles[connection.from].position);
+                points.push(bubbles[connection.to].position);
+                
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                
+                // Материал с толщиной и свечением на основе силы связи
+                const material = new THREE.LineBasicMaterial({
+                    color: new THREE.Color().setHSL(0.5 - connection.strength * 0.3, 0.8, 0.5 + connection.strength * 0.3),
+                    opacity: connection.strength * 0.6 + 0.1,
+                    transparent: true,
+                    linewidth: connection.strength * 3 + 1, // Толщина зависит от силы
+                    blending: THREE.AdditiveBlending
+                });
+                
+                const line = new THREE.Line(geometry, material);
+                
+                // Для очень сильных связей добавляем свечение
+                if (connection.strength > 0.7) {
+                    const glowMaterial = new THREE.LineBasicMaterial({
+                        color: new THREE.Color().setHSL(0.5 - connection.strength * 0.3, 1, 0.7),
+                        opacity: connection.strength * 0.2,
+                        transparent: true,
+                        linewidth: connection.strength * 6 + 2,
+                        blending: THREE.AdditiveBlending
+                    });
+                    
+                    const glowLine = new THREE.Line(geometry.clone(), glowMaterial);
+                    glowLine.userData = {
+                        from: connection.from,
+                        to: connection.to,
+                        strength: connection.strength,
+                        isGlow: true
+                    };
+                    
+                    linesGroup.add(glowLine);
+                    connectionLines.push(glowLine);
+                }
+                
+                // Сохраняем информацию о соединении
+                line.userData = {
+                    from: connection.from,
+                    to: connection.to,
+                    strength: connection.strength,
+                    distance: connection.distance
+                };
+                
+                linesGroup.add(line);
+                connectionLines.push(line);
+            });
+            
+            scene.add(linesGroup);
+        }
+        
+        function createParticles() {
+            const particlesGeometry = new THREE.BufferGeometry();
+            const particlesCount = 2000;
+            const positions = new Float32Array(particlesCount * 3);
+            const colors = new Float32Array(particlesCount * 3);
+            
+            for (let i = 0; i < particlesCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 600;
+                positions[i + 1] = (Math.random() - 0.5) * 400;
+                positions[i + 2] = (Math.random() - 0.5) * 600;
+                
+                const color = new THREE.Color().setHSL(Math.random(), 0.3, 0.3);
+                colors[i] = color.r;
+                colors[i + 1] = color.g;
+                colors[i + 2] = color.b;
+            }
+            
+            particlesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particlesGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            const particlesMaterial = new THREE.PointsMaterial({ 
+                size: 0.2,
+                opacity: 0.4,
+                transparent: true,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending
+            });
+            
+            const particles = new THREE.Points(particlesGeometry, particlesMaterial);
+            scene.add(particles);
+        }
+        
+        function updateStats() {
+            document.getElementById('nodeCount').textContent = `Узлов: ${bubbles.length}`;
+            document.getElementById('connectionCount').textContent = `Связей: ${connections.length}`;
+            
+            let totalConnections = 0;
+            bubbles.forEach(bubble => {
+                totalConnections += bubble.userData.connections.length;
+            });
+            const avgConnections = (totalConnections / bubbles.length).toFixed(1);
+            document.getElementById('avgConnections').textContent = `Среднее связей: ${avgConnections}`;
+        }
+        
+        function onMouseDown(event) {
+            isMouseDown = true;
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        }
+        
+        function onMouseUp(event) {
+            isMouseDown = false;
+        }
+        
+        function onMouseMove(event) {
+            if (!isMouseDown) return;
+            
+            const deltaX = event.clientX - mouseX;
+            const deltaY = event.clientY - mouseY;
+            
+            yawObject.rotation.y -= deltaX * 0.002;
+            pitchObject.rotation.x -= deltaY * 0.002;
+            
+            pitchObject.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitchObject.rotation.x));
+            
+            mouseX = event.clientX;
+            mouseY = event.clientY;
+        }
+        
+        function onKeyDown(event) {
+            switch(event.key.toLowerCase()) {
+                case 'w':
+                case 'ц':
+                    moveForward = true;
+                    break;
+                case 's':
+                case 'ы':
+                    moveBackward = true;
+                    break;
+                case 'a':
+                case 'ф':
+                    moveLeft = true;
+                    break;
+                case 'd':
+                case 'в':
+                    moveRight = true;
+                    break;
+                case ' ':
+                    moveUp = true;
+                    event.preventDefault();
+                    break;
+                case 'control':
+                    moveDown = true;
+                    event.preventDefault();
+                    break;
+                case 'shift':
+                    isShiftPressed = true;
+                    break;
+            }
+        }
+        
+        function onKeyUp(event) {
+            switch(event.key.toLowerCase()) {
+                case 'w':
+                case 'ц':
+                    moveForward = false;
+                    break;
+                case 's':
+                case 'ы':
+                    moveBackward = false;
+                    break;
+                case 'a':
+                case 'ф':
+                    moveLeft = false;
+                    break;
+                case 'd':
+                case 'в':
+                    moveRight = false;
+                    break;
+                case ' ':
+                    moveUp = false;
+                    break;
+                case 'control':
+                    moveDown = false;
+                    break;
+                case 'shift':
+                    isShiftPressed = false;
+                    break;
+            }
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const time = Date.now() * 0.001;
+            
+            // Анимация пузырей
+            bubbles.forEach((bubble, index) => {
+                const userData = bubble.userData;
+                
+                // Плавное покачивание
+                bubble.position.x = userData.originalPosition.x + Math.sin(time * userData.floatSpeed + userData.phase) * 0.5;
+                bubble.position.y = userData.originalPosition.y + Math.sin(time * userData.floatSpeed * 1.3 + userData.phase) * 1;
+                bubble.position.z = userData.originalPosition.z + Math.cos(time * userData.floatSpeed * 0.7 + userData.phase) * 0.5;
+                
+                // Вращение
+                bubble.rotation.x += userData.rotationSpeed;
+                bubble.rotation.y += userData.rotationSpeed * 0.7;
+                
+                // Пульсация узлов с многими связями
+                const connectionCount = userData.connections.length;
+                if (connectionCount > 5) {
+                    const pulsation = 1 + Math.sin(time * 3 + index) * 0.1 * Math.min(connectionCount / 10, 1);
+                    bubble.scale.setScalar(pulsation);
+                }
+            });
+            
+            // Обновление линий связей
+            connectionLines.forEach((line) => {
+                const userData = line.userData;
+                const positions = line.geometry.attributes.position.array;
+                
+                const from = bubbles[userData.from].position;
+                const to = bubbles[userData.to].position;
+                
+                positions[0] = from.x;
+                positions[1] = from.y;
+                positions[2] = from.z;
+                positions[3] = to.x;
+                positions[4] = to.y;
+                positions[5] = to.z;
+                
+                line.geometry.attributes.position.needsUpdate = true;
+                
+                // Пульсация яркости для сильных связей
+                if (userData.strength > 0.5 && !userData.isGlow) {
+                    const pulsation = 0.8 + Math.sin(time * 2 + userData.from) * 0.2;
+                    line.material.opacity = userData.strength * 0.6 * pulsation;
+                }
+            });
+            
+            // Движение камеры
+            const speed = isShiftPressed ? 2.0 : 0.8;
+            
+            velocity.x -= velocity.x * 0.1;
+            velocity.y -= velocity.y * 0.1;
+            velocity.z -= velocity.z * 0.1;
+            
+            const forward = new THREE.Vector3(0, 0, -1);
+            forward.applyQuaternion(yawObject.quaternion);
+            forward.y = 0;
+            forward.normalize();
+            
+            const right = new THREE.Vector3(1, 0, 0);
+            right.applyQuaternion(yawObject.quaternion);
+            right.y = 0;
+            right.normalize();
+            
+            if (moveForward) yawObject.position.add(forward.multiplyScalar(speed));
+            if (moveBackward) yawObject.position.add(forward.multiplyScalar(-speed));
+            if (moveLeft) yawObject.position.add(right.multiplyScalar(-speed));
+            if (moveRight) yawObject.position.add(right.multiplyScalar(speed));
+            if (moveUp) yawObject.position.y += speed;
+            if (moveDown) yawObject.position.y -= speed;
+            
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
