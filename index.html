@@ -584,7 +584,7 @@
                 const bubbleColor = new THREE.Color().setHSL(hue, saturation, lightness);
                 const emissiveColor = new THREE.Color().setHSL(hue, Math.min(1, saturation * 0.85), Math.min(1, lightness + 0.15));
                 const glowColor = new THREE.Color().setHSL(hue, Math.min(1, saturation * 0.9), Math.min(1, lightness + 0.2));
-                const forceGlowColor = new THREE.Color().setHSL(hue, Math.min(1, saturation * 0.95), Math.min(1, lightness + 0.35));
+                const forceGlowColor = new THREE.Color().setHSL(hue, 0.85, 0.75);
 
                 const material = new THREE.MeshPhysicalMaterial({
                     color: bubbleColor,
@@ -629,8 +629,8 @@
                 forceGlowSprite.visible = false;
                 scene.add(forceGlowSprite);
 
-                const sizeCoefficient = 0.45 + Math.random() * 1.2;
-                const brightnessCoefficient = 0.6 + Math.random() * 0.9;
+                const sizeCoefficient = 0.3 + Math.random() * 1.4;
+                const brightnessCoefficient = 0.3 + Math.random() * 1.4;
                 const baseGlowOpacity = glowMaterial.opacity;
 
                 bubble.scale.setScalar(sizeCoefficient);
