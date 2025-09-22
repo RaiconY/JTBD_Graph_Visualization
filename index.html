@@ -136,6 +136,7 @@
         let bubbles = [];
         let connections = [];
         let connectionLines = [];
+        let bubbleGlowTexture;
         let moveForward = false, moveBackward = false;
         let moveLeft = false, moveRight = false;
         let moveUp = false, moveDown = false;
@@ -241,7 +242,27 @@
         function createBubblesAndConnections() {
             const bubbleCount = 600; // Увеличено в 20 раз
             const spreadRadius = 250; // Увеличен радиус распределения
-            
+
+            if (!bubbleGlowTexture) {
+                const glowSize = 256;
+                const glowCanvas = document.createElement('canvas');
+                glowCanvas.width = glowCanvas.height = glowSize;
+                const glowContext = glowCanvas.getContext('2d');
+
+                const center = glowSize / 2;
+                const gradient = glowContext.createRadialGradient(center, center, 0, center, center, center);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+                gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                glowContext.clearRect(0, 0, glowSize, glowSize);
+                glowContext.fillStyle = gradient;
+                glowContext.fillRect(0, 0, glowSize, glowSize);
+
+                bubbleGlowTexture = new THREE.CanvasTexture(glowCanvas);
+                bubbleGlowTexture.needsUpdate = true;
+            }
+
             // Создаем пузыри с кластерным распределением
             for (let i = 0; i < bubbleCount; i++) {
                 const baseRadius = Math.random() * 0.8 + 0.5; // Немного меньше размер для большего количества
@@ -264,6 +285,7 @@
                 const bubble = new THREE.Mesh(geometry, material);
 
                 const glowMaterial = new THREE.SpriteMaterial({
+                    map: bubbleGlowTexture,
                     color: new THREE.Color().setHSL(hue, 0.7, 0.6),
                     transparent: true,
                     opacity: 0.35,
@@ -271,6 +293,7 @@
                     depthWrite: false,
                     depthTest: false
                 });
+                glowMaterial.needsUpdate = true;
                 const glowSprite = new THREE.Sprite(glowMaterial);
                 const baseGlowScale = baseRadius * 4;
                 glowSprite.scale.set(baseGlowScale, baseGlowScale, 1);
