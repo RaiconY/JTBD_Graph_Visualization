@@ -141,6 +141,19 @@
         let moveLeft = false, moveRight = false;
         let moveUp = false, moveDown = false;
         let isShiftPressed = false;
+
+        const localDensityConfig = {
+            cellSize: 60,
+            neighborRadius: 80,
+            maxNeighbors: 12,
+            forceStrength: 0.015,
+            damping: 0.9,
+            maxDriftSpeed: 0.4
+        };
+
+        const localDensityState = {
+            grid: new Map()
+        };
         
         let velocity = new THREE.Vector3();
         
@@ -240,6 +253,7 @@
         }
         
         function createBubblesAndConnections() {
+            localDensityState.grid.clear();
             const bubbleCount = 600; // Увеличено в 20 раз
             const spreadRadius = 250; // Увеличен радиус распределения
 
@@ -336,7 +350,12 @@
                     brightnessCoefficient: brightnessCoefficient,
                     glow: glowSprite,
                     baseGlowScale: baseGlowScale,
-                    baseGlowOpacity: baseGlowOpacity
+                    baseGlowOpacity: baseGlowOpacity,
+                    driftVelocity: new THREE.Vector3(),
+                    densityAccumulator: new THREE.Vector3(),
+                    pendingForce: new THREE.Vector3(),
+                    neighborIndices: [],
+                    localDensity: 0
                 };
 
                 scene.add(bubble);
@@ -570,20 +589,126 @@
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-        
+
+        function rebuildSpatialGrid() {
+            localDensityState.grid.clear();
+            const cellSize = localDensityConfig.cellSize;
+
+            for (let i = 0; i < bubbles.length; i++) {
+                const basePosition = bubbles[i].userData.originalPosition;
+                const ix = Math.floor(basePosition.x / cellSize);
+                const iy = Math.floor(basePosition.y / cellSize);
+                const iz = Math.floor(basePosition.z / cellSize);
+                const key = getCellKey(ix, iy, iz);
+
+                let cell = localDensityState.grid.get(key);
+                if (!cell) {
+                    cell = [];
+                    localDensityState.grid.set(key, cell);
+                }
+
+                cell.push(i);
+            }
+        }
+
+        function getCellKey(ix, iy, iz) {
+            return `${ix},${iy},${iz}`;
+        }
+
+        function collectNeighbors(position, radius, excludeIndex, targetArray) {
+            targetArray.length = 0;
+
+            const cellSize = localDensityConfig.cellSize;
+            const cellRange = Math.ceil(radius / cellSize);
+            const radiusSquared = radius * radius;
+
+            const baseX = Math.floor(position.x / cellSize);
+            const baseY = Math.floor(position.y / cellSize);
+            const baseZ = Math.floor(position.z / cellSize);
+
+            for (let dx = -cellRange; dx <= cellRange; dx++) {
+                for (let dy = -cellRange; dy <= cellRange; dy++) {
+                    for (let dz = -cellRange; dz <= cellRange; dz++) {
+                        const key = getCellKey(baseX + dx, baseY + dy, baseZ + dz);
+                        const cell = localDensityState.grid.get(key);
+
+                        if (!cell) continue;
+
+                        for (let i = 0; i < cell.length; i++) {
+                            const neighborIndex = cell[i];
+                            if (neighborIndex === excludeIndex) continue;
+
+                            const neighborPosition = bubbles[neighborIndex].userData.originalPosition;
+                            if (position.distanceToSquared(neighborPosition) <= radiusSquared) {
+                                targetArray.push(neighborIndex);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
-            
+
             const time = Date.now() * 0.001;
-            
-            // Анимация пузырей
-            bubbles.forEach((bubble, index) => {
+
+            rebuildSpatialGrid();
+
+            for (let i = 0; i < bubbles.length; i++) {
+                const bubble = bubbles[i];
+                const userData = bubble.userData;
+                const basePosition = userData.originalPosition;
+
+                collectNeighbors(basePosition, localDensityConfig.neighborRadius, i, userData.neighborIndices);
+                userData.localDensity = userData.neighborIndices.length;
+
+                const pendingForce = userData.pendingForce;
+                pendingForce.set(0, 0, 0);
+
+                if (userData.neighborIndices.length > 0) {
+                    const accumulator = userData.densityAccumulator;
+                    accumulator.set(0, 0, 0);
+
+                    for (let j = 0; j < userData.neighborIndices.length; j++) {
+                        const neighborIndex = userData.neighborIndices[j];
+                        accumulator.add(bubbles[neighborIndex].userData.originalPosition);
+                    }
+
+                    accumulator.divideScalar(userData.neighborIndices.length);
+                    accumulator.sub(basePosition);
+
+                    const distance = accumulator.length();
+                    if (distance > 0.0001) {
+                        const densityFactor = Math.min(userData.neighborIndices.length / localDensityConfig.maxNeighbors, 1);
+                        const distanceFactor = Math.min(distance / localDensityConfig.neighborRadius, 1);
+
+                        accumulator.normalize();
+                        const strength = localDensityConfig.forceStrength * densityFactor * distanceFactor;
+                        pendingForce.copy(accumulator.multiplyScalar(strength));
+                    }
+                }
+            }
+
+            for (let i = 0; i < bubbles.length; i++) {
+                const bubble = bubbles[i];
                 const userData = bubble.userData;
 
+                userData.driftVelocity.multiplyScalar(localDensityConfig.damping);
+                userData.driftVelocity.add(userData.pendingForce);
+
+                if (userData.driftVelocity.lengthSq() > localDensityConfig.maxDriftSpeed * localDensityConfig.maxDriftSpeed) {
+                    userData.driftVelocity.setLength(localDensityConfig.maxDriftSpeed);
+                }
+
+                userData.originalPosition.add(userData.driftVelocity);
+
+                const basePosition = userData.originalPosition;
+
                 // Плавное покачивание
-                bubble.position.x = userData.originalPosition.x + Math.sin(time * userData.floatSpeed + userData.phase) * 0.5;
-                bubble.position.y = userData.originalPosition.y + Math.sin(time * userData.floatSpeed * 1.3 + userData.phase) * 1;
-                bubble.position.z = userData.originalPosition.z + Math.cos(time * userData.floatSpeed * 0.7 + userData.phase) * 0.5;
+                bubble.position.x = basePosition.x + Math.sin(time * userData.floatSpeed + userData.phase) * 0.5;
+                bubble.position.y = basePosition.y + Math.sin(time * userData.floatSpeed * 1.3 + userData.phase) * 1;
+                bubble.position.z = basePosition.z + Math.cos(time * userData.floatSpeed * 0.7 + userData.phase) * 0.5;
 
                 // Вращение
                 bubble.rotation.x += userData.rotationSpeed;
@@ -593,7 +718,7 @@
                 const connectionCount = userData.connections.length;
                 let scalePulsation = 1;
                 if (connectionCount > 5) {
-                    scalePulsation += Math.sin(time * 3 + index) * 0.1 * Math.min(connectionCount / 10, 1);
+                    scalePulsation += Math.sin(time * 3 + i) * 0.1 * Math.min(connectionCount / 10, 1);
                 }
                 bubble.scale.setScalar(userData.sizeCoefficient * scalePulsation);
 
@@ -615,8 +740,8 @@
                         1
                     );
                 }
-            });
-            
+            }
+
             // Обновление линий связей
             connectionLines.forEach((line) => {
                 const userData = line.userData;
