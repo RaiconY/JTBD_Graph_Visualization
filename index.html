@@ -310,7 +310,8 @@
                     opacity: 0.05,
                     blending: THREE.AdditiveBlending,
                     depthWrite: false,
-                    depthTest: false
+                    depthTest: false,
+                    side: THREE.DoubleSide
                 });
                 const fill = new THREE.Mesh(fillGeometry, fillMaterial);
                 fill.renderOrder = -2;
